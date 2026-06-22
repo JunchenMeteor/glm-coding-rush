@@ -71,8 +71,7 @@ try {
       advanceMs: 150,
       pollIntervalMs: 350,
       reloadIntervalMs: 1200,
-      retryUntil: "10:02:00",
-      retryWindowMs: 120000,
+      retryWindowMs: 3600000,
       dualTab: false,
       takeoverMs: 800,
       stopPoint: "hold", // hold=过验证码后自动点确认支付占位并停在支付页；beforeConfirm=停在确认支付按钮前

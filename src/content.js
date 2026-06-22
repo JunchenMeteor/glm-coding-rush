@@ -508,9 +508,9 @@
   function scheduleNextAttempt() {
     if (!ME.running || ME.finished || ME.clickedBuy) return;
 
-    // 是否超过 retryUntil（服务器时间）
+    // 是否超过重试窗口（相对 fireAt）
     if (isPastRetryUntil()) {
-      log("warn", "loop", "已到 retryUntil 截止时间，停止抢购循环");
+      log("warn", "loop", "已到重试窗口上限，停止抢购循环");
       stopRun("stopped");
       return;
     }
@@ -537,11 +537,11 @@
 
   function isPastRetryUntil() {
     try {
-      // 重试窗口相对「开抢时刻 fireAt」计算（默认 120s）。
+      // 重试窗口相对「开抢时刻 fireAt」计算（默认 3600s=1 小时，options 可改）。
       // 不用绝对 HH:MM:SS：否则手动开抢/非整点测试时，server-now 可能早已越过该钟点而瞬间停止
       // （例如本机时钟慢 2 分钟时，10:00 开抢、绝对 retryUntil=10:02，服务器实际已过 10:02 → 秒停）。
       if (!ME.fireAt) return false;
-      var win = (ME.config && ME.config.retryWindowMs) || 120000;
+      var win = (ME.config && ME.config.retryWindowMs) || 3600000;
       return nowSrv() >= (ME.fireAt + win);
     } catch (e) { return false; }
   }
@@ -1144,7 +1144,7 @@
     ME.running = true;
     setStatus("running");
     saveRunFlag(ME.clickedBuy ? "clicked-buy" : "running");
-    log("success", "loop", "进入抢购循环（attempts 上限=" + MAX_ATTEMPTS + "，重试窗口=" + Math.round(((ME.config && ME.config.retryWindowMs) || 120000) / 1000) + "s，自 fireAt 起算）");
+    log("success", "loop", "进入抢购循环（attempts 上限=" + MAX_ATTEMPTS + "，重试窗口=" + Math.round(((ME.config && ME.config.retryWindowMs) || 3600000) / 1000) + "s，自 fireAt 起算）");
     // 立即开第一拍
     tryBuy();
   }

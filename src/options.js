@@ -31,8 +31,7 @@
     advanceMs: 150,
     pollIntervalMs: 350,
     reloadIntervalMs: 1200,
-    retryUntil: "10:02:00",
-    retryWindowMs: 120000,
+    retryWindowMs: 3600000,
     dualTab: false,
     takeoverMs: 800,
     stopPoint: "hold",
@@ -167,9 +166,9 @@
           c.pollIntervalMs != null
             ? c.pollIntervalMs
             : DEFAULT_CONFIG.pollIntervalMs;
-      if ($("f-retryUntil"))
-        $("f-retryUntil").value =
-          normTime(c.retryUntil) || DEFAULT_CONFIG.retryUntil;
+      if ($("f-retryWindowSec"))
+        $("f-retryWindowSec").value =
+          Math.round((c.retryWindowMs != null ? c.retryWindowMs : DEFAULT_CONFIG.retryWindowMs) / 1000);
       if ($("f-dailyRearm"))
         $("f-dailyRearm").checked =
           c.dailyRearm != null ? !!c.dailyRearm : DEFAULT_CONFIG.dailyRearm;
@@ -298,17 +297,14 @@
         cfg.pollIntervalMs = clampInt(poll, POLL_FLOOR, 5000);
       }
 
-      // --- retryUntil（须晚于 dropTime）---
-      var retryRaw = $("f-retryUntil") ? $("f-retryUntil").value : "";
-      var retryUntil = normTime(retryRaw);
-      if (!retryUntil) {
-        fail("retryUntil", "时间格式应为 HH:MM:SS。");
-        cfg.retryUntil = DEFAULT_CONFIG.retryUntil;
-      } else if (dropTime && timeToSeconds(retryUntil) <= timeToSeconds(dropTime)) {
-        fail("retryUntil", "重试截止时刻应晚于开售时刻。");
-        cfg.retryUntil = retryUntil;
+      // --- retryWindow（重试时长，秒 → ms）---
+      var rwRaw = $("f-retryWindowSec") ? $("f-retryWindowSec").value : "";
+      var rwSec = parseInt(rwRaw, 10);
+      if (rwRaw === "" || isNaN(rwSec) || rwSec < 10 || rwSec > 21600) {
+        fail("retryWindow", "应为 10 ~ 21600 的整数（秒）。");
+        cfg.retryWindowMs = DEFAULT_CONFIG.retryWindowMs;
       } else {
-        cfg.retryUntil = retryUntil;
+        cfg.retryWindowMs = rwSec * 1000;
       }
 
       // --- dailyRearm ---
