@@ -366,6 +366,25 @@
     }
   }
 
+  /*
+   * orderFailed() —— 下单失败/被抢走探测。
+   * 只扫「消息提示/通知/对话框/toast」容器内的失败文案(库存不足/已售罄/已抢完/手慢了/下单失败…)，
+   * 不扫整页 —— 避免把常驻的「暂时售罄」购买按钮误判为失败。命中返回文案(便于日志)，否则 null。
+   */
+  function orderFailed() {
+    try {
+      var sel = '.el-message, .el-message--error, .el-notification, .el-notification__content, .el-message-box, .el-dialog__body, [class*="toast"], [role="alert"]';
+      var nodes = document.querySelectorAll(sel);
+      var re = /库存不足|已售罄|已抢完|已售完|抢光|售罄了|手慢|来晚|下单失败|抢购失败|创建订单失败|购买失败|稍后再试|系统繁忙|已被抢/;
+      for (var i = 0; i < nodes.length; i++) {
+        if (!isVisible(nodes[i])) continue;
+        var t = textOf(nodes[i]);
+        if (t && re.test(t)) return t.slice(0, 40);
+      }
+      return null;
+    } catch (e) { return null; }
+  }
+
   G.selectors = {
     // 常量
     BUY_BTN: BUY_BTN,
@@ -385,6 +404,7 @@
     isBusyPage: isBusyPage,
     captchaOpen: captchaOpen,
     payDialogOpen: payDialogOpen,
+    orderFailed: orderFailed,
     // 辅助（导出便于复用/测试）
     _textOf: textOf,
     _matchAny: matchAny,

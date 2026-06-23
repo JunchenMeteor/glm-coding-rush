@@ -657,6 +657,15 @@
     try { return typeof fn === "function" ? fn() : undefined; } catch (e) { return undefined; }
   }
 
+  // 节流上报健康度（attempts/上次检查时间），供 popup 显示"运行中·已尝试N次·Xs前检查"
+  var _lastHealthAt = 0;
+  function healthPatch() {
+    var t = Date.now();
+    if (t - _lastHealthAt < 1500) return;
+    _lastHealthAt = t;
+    patchState({ attempts: ME.attempts, lastCheckAt: t });
+  }
+
   // ---- 可购买：点击购买 ----
   function onBuyable(btn) {
     sendBg("buyable");
@@ -750,12 +759,18 @@
   function onSoldOut(entry, btn) {
     sendBg("soldOut");
     setStatus("sold-out-retry");
+    healthPatch();
 
     // 很多限量「售罄态」要刷新后才翻牌，故售罄即按「刷新周期」硬刷新拉取最新库存。
     // hybrid / reload 策略都走刷新；observe 策略只原地轮询（靠 MutationObserver 捕获反应式翻转）。
     var strat = (ME.config && ME.config.triggerStrategy) || "hybrid";
     if (strat === "hybrid" || strat === "reload") {
       var cycle = (ME.config && ME.config.reloadIntervalMs) || 1200; // 刷新周期，默认 ~1.2s
+      // 自适应：距开抢(fireAt)超过 burstWindowMs(默认3min)后退避到 slowReloadIntervalMs(默认4s)，
+      // 前期猛刷抓秒放量/退单回流，长尾放缓更礼貌、少触发风控。
+      var burst = (ME.config && ME.config.burstWindowMs) || 180000;
+      var slow = (ME.config && ME.config.slowReloadIntervalMs) || 4000;
+      if (ME.fireAt && (nowSrv() - ME.fireAt) > burst) cycle = Math.max(cycle, slow);
       var since = Date.now() - ME.lastReloadAt;
       if (since > Math.max(RELOAD_FLOOR_MS, cycle)) {
         ME.lastReloadAt = Date.now();
@@ -793,8 +808,12 @@
     // 大声提醒：蜂鸣循环 + 顶部大横幅（背景通知由 background 负责）
     startBeepLoop();
     showBanner("⚠ 请立即完成验证码（人工） ⚠", "#e53935");
-    // 尝试把页面/窗口拉到前台焦点
+    // 尝试把页面/窗口拉到前台焦点，并把验证码滚动到可视区，便于立刻操作
     try { window.focus(); } catch (e) {}
+    try {
+      var capEl = document.querySelector('#tcaptcha_transform_dy, iframe[src*="captcha"], [id*="tcaptcha"], .tcaptcha-transform');
+      if (capEl && capEl.scrollIntoView) capEl.scrollIntoView({ block: "center", inline: "center" });
+    } catch (e) {}
   }
 
   /*
@@ -823,6 +842,12 @@
         ME.pollTimer = setTimeout(poll, 250);
         return;
       }
+
+      // 过码后若弹出「库存不足/已售罄/手慢了/下单失败」等失败提示 → 立即重抢
+      // （这正是"过码那几秒被别人抢走"的场景；orderFailed 只看 el-message/通知/对话框，
+      //   不会把常驻的"暂时售罄"按钮误判为失败）。
+      var failCap = safe(S.orderFailed);
+      if (failCap) { retryAfterFail("过码后失败: " + failCap); return; }
 
       // 验证码已关
       if (payOpen) {
@@ -902,6 +927,9 @@
     var poll = function () {
       if (ME.finished) return;
       tries++;
+      // 确认支付后若出现失败弹窗（库存被并发抢走等）→ 重抢
+      var failPay = safe(S.orderFailed);
+      if (failPay) { retryAfterFail("确认支付后失败: " + failPay); return; }
       var reached = detectPaymentPage();
       if (reached.ok) {
         // 金额安全：解析到金额且 ¥0 -> 异常（视为失败）
@@ -1049,6 +1077,30 @@
     clearRunFlag();
   }
 
+  // 下单未成功（过码那几秒被别人抢走 / 创建订单失败）→ 重置下单态、刷新清掉错误弹窗、回循环重抢
+  // （限重试窗口内）。仅在「明确失败信号」时触发,故不会造成单账号重复下单。
+  function retryAfterFail(reason) {
+    if (ME.finished) return;
+    if (isPastRetryUntil()) {
+      log("warn", "retry", "已过重试窗口，不再重抢（" + reason + "）");
+      stopRun("stopped");
+      return;
+    }
+    log("warn", "retry", "下单未成功（" + reason + "）→ 刷新后回循环重抢");
+    ME.clickedBuy = false;
+    ME.confirmClicked = false;
+    ME.captchaWaiting = false;
+    ME.captchaAnnounced = false;
+    ME.captchaPassedHandled = false;
+    cleanupTimers();
+    stopBeepLoop();
+    saveRunFlag("running");
+    var target = reloadFreshUrl();
+    setTimeout(function () {
+      try { location.replace(target); } catch (e) { try { location.reload(); } catch (e2) {} }
+    }, jitter(RELOAD_FLOOR_MS));
+  }
+
   function cleanupTimers() {
     try { if (ME.retryTimer) { clearTimeout(ME.retryTimer); ME.retryTimer = null; } } catch (e) {}
     try { if (ME.pollTimer) { clearTimeout(ME.pollTimer); ME.pollTimer = null; } } catch (e) {}
@@ -1099,16 +1151,21 @@
     patchState({ target: { tier: ME.target.tier, period: ME.target.period, productId: ME.target.productId || null } });
     attachObserver();
 
-    // 3) 本地再做一次时间同步（content 侧可直接 fetch 同源，最准）
-    try {
-      var off = await T.sync(SITE_URL, 5);
-      if (typeof off === "number" && isFinite(off)) {
-        ME.offsetMs = off;
-        patchState({ offsetMs: off });
-        log("info", "time", "content 侧时间同步完成 offset≈" + Math.round(off) + "ms（HTTP Date 仅秒级，±500ms 由 advanceMs+重试爆发补偿）");
+    // 3) 时间同步：仅「首次开抢」做一次。断点恢复(刷新续跑)沿用 storage 已同步的 offset，
+    //    避免每次刷新都白跑 5 连发对时（拖慢"刷新→再查"节奏、平添请求）。
+    if (!opts.resume) {
+      try {
+        var off = await T.sync(SITE_URL, 5);
+        if (typeof off === "number" && isFinite(off)) {
+          ME.offsetMs = off;
+          patchState({ offsetMs: off });
+          log("info", "time", "content 侧时间同步完成 offset≈" + Math.round(off) + "ms");
+        }
+      } catch (e) {
+        log("warn", "time", "content 侧时间同步失败，沿用 offset=" + Math.round(ME.offsetMs) + "ms");
       }
-    } catch (e) {
-      log("warn", "time", "content 侧时间同步失败，沿用 offset=" + Math.round(ME.offsetMs) + "ms");
+    } else {
+      log("info", "time", "断点恢复，沿用已同步 offset≈" + Math.round(ME.offsetMs) + "ms（不重复对时）");
     }
 
     // 断点恢复：若已处于点击后阶段，直接进入对应阶段，不再等待 fireAt

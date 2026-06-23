@@ -68,12 +68,83 @@
     return (s[mid - 1] + s[mid]) / 2;
   }
 
+  // ===== 毫秒级对时：从接口 JSON 响应体取服务器毫秒时间戳（若存在）=====
+  // HTTP Date 头只有秒级；若某接口响应体带服务器 ms 时间戳，精度可达 ~RTT/2(几十 ms)。
+  // 候选接口(同源，登录态可达)；若都不带 ts，则自动回退到 Date 头，无任何回归。
+  var API_TS_URLS = [
+    "https://open.bigmodel.cn/api/biz/tokenResPack/productIdInfo",
+    "https://open.bigmodel.cn/api/biz/operation/query?ids=1111"
+  ];
+  var TS_FIELDS = ["timestamp", "serverTime", "serverTimestamp", "ts", "now", "time", "currentTime", "sysTime", "systemTime", "respTime", "responseTime"];
+  var _lastSource = "";
+
+  // 递归在 JSON 里找"像 epoch 毫秒(13位, 约 2001~2100)"的时间戳，优先常见字段名
+  function findEpochMs(obj, depth) {
+    if (obj == null || depth > 4) return 0;
+    try {
+      if (typeof obj === "number") return (obj > 1e12 && obj < 4102444800000) ? obj : 0;
+      if (typeof obj === "string") {
+        if (/^\d{13}$/.test(obj)) { var nn = parseInt(obj, 10); return (nn > 1e12 && nn < 4102444800000) ? nn : 0; }
+        return 0;
+      }
+      if (typeof obj === "object") {
+        for (var i = 0; i < TS_FIELDS.length; i++) {
+          if (obj[TS_FIELDS[i]] != null) { var g1 = findEpochMs(obj[TS_FIELDS[i]], depth + 1); if (g1) return g1; }
+        }
+        for (var k in obj) {
+          if (!Object.prototype.hasOwnProperty.call(obj, k)) continue;
+          var g2 = findEpochMs(obj[k], depth + 1);
+          if (g2) return g2;
+        }
+      }
+    } catch (e) {}
+    return 0;
+  }
+
+  async function measureOnceApi(url) {
+    var bust = (url.indexOf("?") === -1 ? "?" : "&") + "_ts=" + Date.now();
+    var t0 = Date.now();
+    var resp = await fetch(url + bust, { method: "GET", cache: "no-store", credentials: "include", redirect: "follow" });
+    var t1 = Date.now();
+    var data;
+    try { data = await resp.json(); } catch (e) { return null; }
+    var serverMs = findEpochMs(data, 0);
+    if (!serverMs) return null;
+    var rtt = t1 - t0;
+    return { offset: serverMs - (t0 + rtt / 2), rtt: rtt };
+  }
+
+  // 找到第一个带 ms 时间戳的接口，对它采样 n 次取(低 rtt 半数的)中位数；无可用源返回 null
+  async function syncApi(urls, samples) {
+    var list = urls || API_TS_URLS;
+    var n = samples || 5;
+    var good = null;
+    for (var i = 0; i < list.length; i++) {
+      try { var probe = await measureOnceApi(list[i]); if (probe) { good = list[i]; break; } } catch (e) {}
+    }
+    if (!good) return null;
+    var results = [];
+    for (var k = 0; k < n; k++) {
+      try { var r = await measureOnceApi(good); if (r) results.push(r); } catch (e) {}
+    }
+    if (!results.length) return null;
+    results.sort(function (a, b) { return a.rtt - b.rtt; });
+    var keep = results.slice(0, Math.max(1, Math.ceil(results.length / 2)));
+    return median(keep.map(function (r) { return r.offset; }));
+  }
+
   /*
-   * sync(url, samples=5) —— 多次采样取中位数 offset（毫秒）。
-   * 失败的单次会被跳过；全部失败返回 0（即视为不偏移，保守处理）。
-   * 同时优先采用 rtt 较小的样本（网络抖动小，更可信）。
+   * sync(url, samples=5) —— 优先用接口毫秒时间戳，回退 HTTP Date 头；取中位数 offset（毫秒）。
+   * 失败的单次会被跳过；全部失败返回 0（即视为不偏移，保守处理）。优先采用 rtt 较小的样本。
    */
   async function sync(url, samples) {
+    // 优先：接口响应体里的服务器毫秒时间戳（精度 ~RTT/2）
+    try {
+      var apiOff = await syncApi(null, samples);
+      if (apiOff != null && isFinite(apiOff)) { _lastSource = "api-ms"; return apiOff; }
+    } catch (e) {}
+    // 回退：HTTP Date 头（仅秒级，±500ms，由 advanceMs+重试补偿）
+    _lastSource = "date-header";
     var n = samples || 5;
     var results = [];
     for (var i = 0; i < n; i++) {
@@ -106,8 +177,11 @@
   G.timesync = {
     DEFAULT_URL: DEFAULT_URL,
     measureOnce: measureOnce,
+    measureOnceApi: measureOnceApi,
+    syncApi: syncApi,
     sync: sync,
     now: now,
+    lastSource: function () { return _lastSource; },
     _median: median
   };
 })();

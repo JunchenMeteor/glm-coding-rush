@@ -46,7 +46,7 @@ try {
   // ===== 常量 =====
   var SITE_URL = "https://open.bigmodel.cn/glm-coding";
   var TIME_SYNC_URL = "https://open.bigmodel.cn/glm-coding";
-  var LOGS_CAP = 500; // 日志环形缓冲上限
+  var LOGS_CAP = 1000; // 日志环形缓冲上限（长跑窗口下保留更多历史）
   var ALARM_NAME = "glm-fire"; // 主调度 alarm
   var PREHEAT_ALARM = "glm-preheat"; // 预热（开标签+再同步）alarm
   var WATCHDOG_ALARM = "glm-watchdog"; // 接管看门狗 alarm
@@ -71,6 +71,8 @@ try {
       advanceMs: 150,
       pollIntervalMs: 350,
       reloadIntervalMs: 1200,
+      burstWindowMs: 180000,
+      slowReloadIntervalMs: 4000,
       retryWindowMs: 3600000,
       dualTab: false,
       takeoverMs: 800,

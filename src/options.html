@@ -419,6 +419,42 @@
           </div>
         </div>
 
+        <div class="field" data-field="reloadIntervalMs">
+          <label class="k" for="f-reloadIntervalMs">刷新周期 reloadIntervalMs</label>
+          <div class="v">
+            <div class="with-unit">
+              <input type="number" id="f-reloadIntervalMs" class="tiny" min="250" max="10000" step="50" />
+              <span class="unit">毫秒</span>
+            </div>
+            <div class="hint">刷新驱动重试时每隔多久整页刷新一次（猛刷阶段）。默认 1200。</div>
+            <div class="err">应为 250 ~ 10000 的整数。</div>
+          </div>
+        </div>
+
+        <div class="field" data-field="burstWindow">
+          <label class="k" for="f-burstWindowSec">猛刷时长 burstWindow</label>
+          <div class="v">
+            <div class="with-unit">
+              <input type="number" id="f-burstWindowSec" class="tiny" min="0" max="3600" step="10" />
+              <span class="unit">秒</span>
+            </div>
+            <div class="hint">开抢后前多少秒用"刷新周期"猛刷，之后退避到"放缓周期"。默认 180=3 分钟。</div>
+            <div class="err">应为 0 ~ 3600 的整数（秒）。</div>
+          </div>
+        </div>
+
+        <div class="field" data-field="slowReloadIntervalMs">
+          <label class="k" for="f-slowReloadIntervalMs">放缓周期 slowReloadIntervalMs</label>
+          <div class="v">
+            <div class="with-unit">
+              <input type="number" id="f-slowReloadIntervalMs" class="tiny" min="250" max="60000" step="100" />
+              <span class="unit">毫秒</span>
+            </div>
+            <div class="hint">超过"猛刷时长"后的刷新间隔（长尾更礼貌）。默认 4000=4 秒。</div>
+            <div class="err">应为 250 ~ 60000 的整数。</div>
+          </div>
+        </div>
+
         <div class="field" data-field="retryWindow">
           <label class="k" for="f-retryWindowSec">重试时长 retryWindow</label>
           <div class="v">

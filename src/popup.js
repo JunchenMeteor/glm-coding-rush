@@ -146,7 +146,14 @@
     elCountdownTime.textContent = fmtRemain(remain);
     elFireAt.textContent = "开抢：" + fmtClock(nextFireAt);
     var off = Math.round(offsetMs);
-    elOffset.textContent = "时间偏移 " + (off >= 0 ? "+" : "") + off + " ms（秒级精度，T0 由内容脚本毫秒自旋补偿）";
+    var line = "时间偏移 " + (off >= 0 ? "+" : "") + off + " ms";
+    if (lastState && lastState.attempts != null) {
+      line += " · 已尝试 " + lastState.attempts + " 次";
+      if (lastState.lastCheckAt) {
+        line += " · " + Math.max(0, Math.round((Date.now() - lastState.lastCheckAt) / 1000)) + "s 前检查";
+      }
+    }
+    elOffset.textContent = line;
     // 临近 10 秒高亮
     if (remain <= 10000 && remain > -3000) {
       elCountdownCard.classList.add("imminent");
